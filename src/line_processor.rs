@@ -1,33 +1,36 @@
-use sonic_rs::{JsonValueTrait, Value, from_str};
+use sonic_rs::JsonValueTrait;
 
-use crate::session_detector::SessionDetector;
+use crate::{ProcessError, ansi_color, session::SessionStartDetector};
 
 // --------------------------------------------------------------------------
 
 #[cfg(windows)]
-const SESSION_BREAK: &str = "\x1b[34m---------------------------------------------\x1b[m\r\n";
+const SESSION_BREAK_COLOR: &str = "\x1b[34m---------------------------------------------\x1b[m\r\n";
 
 #[cfg(not(windows))]
-const SESSION_BREAK: &str = "\x1b[34m---------------------------------------------\x1b[m\n";
+const SESSION_BREAK_COLOR: &str = "\x1b[34m---------------------------------------------\x1b[m\n";
 
 #[cfg(windows)]
-const RESET_EOL: &str = "\x1b[m\r\n";
+const SESSION_BREAK: &str = "---------------------------------------------\r\n";
 
 #[cfg(not(windows))]
-const RESET_EOL: &str = "\x1b[m\n";
+const SESSION_BREAK: &str = "---------------------------------------------\n";
 
-const DEFAULT_COLOR_TABLE: [&str; 8] = [
-    "\x1b[38;5;5m",   // Unknown -> Purple
-    "\x1b[38;5;9m",   // Error -> Red
-    "\x1b[38;5;11m",  // Warning -> Yellow
-    "\x1b[38;5;254m", // Info -> White
-    "\x1b[38;5;97m",  // Http -> Purple-ish
-    "\x1b[38;5;6m",   // Verbose -> Cyan
-    "\x1b[38;5;27m",  // Debug -> Blue
-    "\x1b[38;5;27m",  // Silly -> Blue
-];
+#[cfg(windows)]
+const END_OF_LINE: &str = "\r\n";
 
-const DEFAULT_LEVEL_LABEL_TABLE: [&str; 8] = [
+#[cfg(not(windows))]
+const END_OF_LINE: &str = "\n";
+
+#[cfg(windows)]
+const END_OF_LINE_COLOR: &str = "\x1b[m\r\n";
+
+#[cfg(not(windows))]
+const END_OF_LINE_COLOR: &str = "\x1b[m\n";
+
+// --------------------------------------------------------------------------
+
+const DEFAULT_LEVEL_TABLE: [&str; 8] = [
     " [unk] ", // Unknown
     " [err] ", // Error
     " [wrn] ", // Warning
@@ -38,88 +41,145 @@ const DEFAULT_LEVEL_LABEL_TABLE: [&str; 8] = [
     " [sil] ", // Silly
 ];
 
+// See color table here https://en.wikipedia.org/wiki/ANSI_escape_code#8-bit
+//
+// Color names are from https://colornamer.robertcooper.me/
+const DEFAULT_LEVEL_TABLE_COLOR: [&str; 8] = [
+    concat!(ansi_color!(fg: 5), " [unk] "),   // Unknown -> Purple
+    concat!(ansi_color!(fg: 9), " [err] "),   // Error -> Red
+    concat!(ansi_color!(fg: 11), " [wrn] "),  // Warning -> Yellow
+    concat!(ansi_color!(fg: 254), " [inf] "), // Info -> Titanium White
+    concat!(ansi_color!(fg: 97), " [web] "),  // Http -> Lusty Lavender
+    concat!(ansi_color!(fg: 6), " [vrb] "),   // Verbose -> Teal
+    concat!(ansi_color!(fg: 27), " [dbg] "),  // Debug -> Bright Blue
+    concat!(ansi_color!(fg: 27), " [sil] "),  // Silly -> Bright Blue
+];
+
 // --------------------------------------------------------------------------
 
+/// Processes lines from the log (in jsonl format)
 pub struct LineProcessor<'a> {
-    detector: SessionDetector,
-    timestamp_color: &'a str,
-    color_table: [&'a str; 8],
-    label_table: [&'a str; 8],
+    detector: SessionStartDetector,
+    skip_invalid_lines: bool,
+    timestamp_prefix: &'a str,
+    level_table: [&'a str; 8],
+    break_line: &'a str,
+    eol: &'a str,
 }
 
-pub enum ProcessError {
-    Unknown,
-}
+impl LineProcessor<'_> {
+    /// Creates a new line processor
+    ///
+    pub fn new(detector: SessionStartDetector, skip_invalid_lines: bool, use_color: bool) -> Self {
+        let (break_line, eol, level_table, timestamp_prefix) = if use_color {
+            (
+                SESSION_BREAK_COLOR,
+                END_OF_LINE_COLOR,
+                DEFAULT_LEVEL_TABLE_COLOR,
+                ansi_color!(fg: 6),
+            )
+        } else {
+            (SESSION_BREAK, END_OF_LINE, DEFAULT_LEVEL_TABLE, "")
+        };
 
-impl<'a> LineProcessor<'a> {
-    pub fn new(detector: SessionDetector) -> Self {
         Self {
             detector,
-            timestamp_color: "\x1b[36m",
-            color_table: DEFAULT_COLOR_TABLE,
-            label_table: DEFAULT_LEVEL_LABEL_TABLE,
+            skip_invalid_lines,
+            break_line,
+            eol,
+            timestamp_prefix,
+            level_table,
         }
     }
 
-    fn get_level_index(level: &str) -> usize {
+    fn get_level_label(&self, level: &str) -> &str {
         match level {
-            "error" => 1,
-            "warn" => 2,
-            "info" => 3,
-            "http" => 4,
-            "verbose" => 5,
-            "debug" => 6,
-            "silly" => 7,
-            _ => 0, // Unknown
+            "error" => self.level_table[1],
+            "warn" => self.level_table[2],
+            "info" => self.level_table[3],
+            "http" => self.level_table[4],
+            "verbose" => self.level_table[5],
+            "debug" => self.level_table[6],
+            "silly" => self.level_table[7],
+            _ => self.level_table[0], // Unknown
         }
     }
 
-    pub fn process_lines<R, W>(&self, lines: R, w: &mut W) -> std::io::Result<()>
+    /// Processes lines from the given [`BufRead`] implementation and writes
+    /// each parsed line to the given [`Write`] implementation.
+    ///
+    /// Aborts and returns an error if we could not read from `lines` or write
+    /// to `w` at any point. If any of the lines are not parsable, we either
+    /// abort and return an error, or skip, depending on the setting of
+    /// `skip_invalid_lines`
+    ///
+    pub fn process_lines<R, W>(&self, lines: R, w: &mut W) -> crate::Result<()>
     where
         R: std::io::BufRead,
         W: std::io::Write,
     {
+        // The line buffer is re-used for all lines, so giving it a large-ish
+        // capacity will minimize runtime allocations, assuming the vast
+        // majority of log lines will be less than ≈8000 characters long
         let mut line_buffer = String::with_capacity(8192);
+        // we track the line number of the log for debugging (invalid json lines
+        // in the log, for example)
+        let mut line_no = 1;
         for line in lines.lines() {
             line_buffer.clear();
-            let buf = self.process_line(line?, &mut line_buffer);
-            w.write_all(buf.as_bytes())?;
+            let line = line.map_err(|e| ProcessError::from_read_error(line_no, e))?;
+            self.process_line(line_no, line, &mut line_buffer)?;
+            w.write_all(line_buffer.as_bytes())
+                .map_err(ProcessError::from_write_error)?;
+            line_no += 1;
         }
         Ok(())
     }
 
-    fn process_line(&'a self, line: String, line_buffer: &'a mut String) -> &'a str {
+    /// Helper function that processes a single line of the log
+    ///
+    fn process_line(
+        &self,
+        line_no: usize,
+        line: String,
+        line_buffer: &mut String,
+    ) -> crate::Result<()> {
         // parse the JSON line
-        let log_line: Value = from_str(line.as_str()).unwrap();
-
-        //
-        let ts = log_line.get("timestamp").unwrap().as_str().unwrap();
-        let level = log_line.get("level").unwrap().as_str().unwrap();
-
-        let message = log_line.get("message").unwrap().as_str().unwrap();
-        if self.detector.is_new_session(message) {
-            line_buffer.push_str(SESSION_BREAK);
+        match sonic_rs::from_slice::<sonic_rs::Value>(line.as_bytes()) {
+            Err(err) => {
+                if !self.skip_invalid_lines {
+                    Err(ProcessError::from_parse_error(line_no, err))
+                } else {
+                    line_buffer.push_str(format!("--- skipped line {line_no} ---").as_str());
+                    line_buffer.push_str(self.eol);
+                    Ok(())
+                }
+            }
+            Ok(log_line) => {
+                let ts = log_line.get("timestamp").unwrap().as_str().unwrap();
+                let level = log_line.get("level").unwrap().as_str().unwrap();
+                let message = log_line.get("message").unwrap().as_str().unwrap();
+                if self.detector.is_new_session(message) {
+                    line_buffer.push_str(self.break_line);
+                }
+                self.print_log_line(line_buffer, ts, level, message);
+                Ok(())
+            }
         }
+    }
 
-        let level_index = Self::get_level_index(level);
-        let level_color = self.color_table[level_index];
-        let level_label = self.label_table[level_index];
-
-        // time stamp
-        line_buffer.push_str(self.timestamp_color);
+    fn print_log_line(&self, line_buffer: &mut String, ts: &str, level: &str, message: &str) {
+        // timestamp
+        line_buffer.push_str(self.timestamp_prefix);
         line_buffer.push_str(&ts[11..]);
 
         // level
-        line_buffer.push_str(level_color);
-        line_buffer.push_str(level_label);
+        line_buffer.push_str(self.get_level_label(level));
 
-        // message (reusing the color from level)
+        // message (reusing the color state from level)
         line_buffer.push_str(message);
 
         // reset colors and write new line
-        line_buffer.push_str(RESET_EOL);
-
-        // return the formatted line
-        line_buffer.as_str()
+        line_buffer.push_str(self.eol);
     }
 }
