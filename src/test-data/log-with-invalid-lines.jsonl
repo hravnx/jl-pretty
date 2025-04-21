@@ -1,0 +1,7 @@
+{"level":"info","message":"First valid line","timestamp":"2025-04-10T20:25:01.133Z"}
+not json
+{"level":"warn","message":"Second valid line","timestamp":"2025-04-10T20:26:01.133Z"}
+also not json
+even more not json
+{"level":"info","message":"Third valid line","timestamp":"2025-04-10T20:27:01.133Z"}
+does not even end with json

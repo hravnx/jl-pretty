@@ -1,6 +1,6 @@
 [package]
 name = "jl-pretty"
-description = "Read JSON log lines  and unpacks them to std out"
+description = "Read JSON log lines and pretty-prints them to std out"
 version = "0.1.0"
 edition = "2024"
 

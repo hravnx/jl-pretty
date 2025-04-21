@@ -11,6 +11,7 @@ pub use session::SessionStartDetector;
 // --------------------------------------------------------------------------
 
 /// Enumerates the kinds of errors that can happen during line processing
+#[derive(Debug)]
 pub enum ProcessError {
     /// An error happened during JSON parsing of the individual log lines
     ParseError(usize, sonic_rs::Error),

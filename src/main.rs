@@ -54,6 +54,7 @@ fn main() -> ExitCode {
 // --------------------------------------------------------------------------
 
 #[derive(Parser)]
+#[command(version, about, long_about = None)]
 struct Cli {
     /// File to read from, if not given std in is used
     #[arg(short, long, value_name = "FILE")]
