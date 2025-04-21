@@ -1,5 +1,6 @@
 mod ansi;
 mod line_processor;
+mod logline;
 mod session;
 
 use std::path::PathBuf;

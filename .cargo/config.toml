@@ -1,6 +1,9 @@
+# The settings here ensures that sonic_rs is built with SIMD instructions
+# cSpell: disable
+
 [build]
 rustdocflags = ["-C", "target-cpu=native"]
-rustflags    = ["-g", "-C", "target-cpu=native"]
+rustflags    = ["-C", "target-cpu=native"]
 
 [bench]
 rustdocflags = ["-C", "target-cpu=native"]

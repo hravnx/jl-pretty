@@ -1,6 +1,4 @@
-use sonic_rs::JsonValueTrait;
-
-use crate::{ProcessError, ansi_color, session::SessionStartDetector};
+use crate::{ProcessError, ansi_color, logline::LogLine, session::SessionStartDetector};
 
 // --------------------------------------------------------------------------
 
@@ -120,7 +118,7 @@ impl LineProcessor<'_> {
     {
         // The line buffer is re-used for all lines, so giving it a large-ish
         // capacity will minimize runtime allocations, assuming the vast
-        // majority of log lines will be less than ≈8000 characters long
+        // majority of log lines will be less than 8Kib bytes long.
         let mut line_buffer = String::with_capacity(8192);
         // we track the line number of the log for debugging (invalid json lines
         // in the log, for example)
@@ -145,7 +143,7 @@ impl LineProcessor<'_> {
         line_buffer: &mut String,
     ) -> crate::Result<()> {
         // parse the JSON line
-        match sonic_rs::from_slice::<sonic_rs::Value>(line.as_bytes()) {
+        match sonic_rs::from_slice::<LogLine>(line.as_bytes()) {
             Err(err) => {
                 if !self.skip_invalid_lines {
                     Err(ProcessError::from_parse_error(line_no, err))
@@ -156,28 +154,25 @@ impl LineProcessor<'_> {
                 }
             }
             Ok(log_line) => {
-                let ts = log_line.get("timestamp").unwrap().as_str().unwrap();
-                let level = log_line.get("level").unwrap().as_str().unwrap();
-                let message = log_line.get("message").unwrap().as_str().unwrap();
-                if self.detector.is_new_session(message) {
+                if self.detector.is_new_session(&log_line) {
                     line_buffer.push_str(self.break_line);
                 }
-                self.print_log_line(line_buffer, ts, level, message);
+                self.print_log_line(line_buffer, &log_line);
                 Ok(())
             }
         }
     }
 
-    fn print_log_line(&self, line_buffer: &mut String, ts: &str, level: &str, message: &str) {
+    fn print_log_line(&self, line_buffer: &mut String, log_line: &LogLine) {
         // timestamp
         line_buffer.push_str(self.timestamp_prefix);
-        line_buffer.push_str(&ts[11..]);
+        line_buffer.push_str(&log_line.timestamp()[11..]);
 
         // level
-        line_buffer.push_str(self.get_level_label(level));
+        line_buffer.push_str(self.get_level_label(log_line.level()));
 
         // message (reusing the color state from level)
-        line_buffer.push_str(message);
+        line_buffer.push_str(log_line.message());
 
         // reset colors and write new line
         line_buffer.push_str(self.eol);

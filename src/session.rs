@@ -1,5 +1,7 @@
 use regex::Regex;
 
+use crate::logline::LogLine;
+
 /// When and how to detect a new session
 pub enum SessionStartDetector {
     /// no new sessions are detected
@@ -29,11 +31,11 @@ impl SessionStartDetector {
     }
 
     /// Checks if the given line indicates a new session
-    pub fn is_new_session(&self, line: &str) -> bool {
+    pub fn is_new_session(&self, line: &LogLine) -> bool {
         match self {
             SessionStartDetector::Never => false,
-            SessionStartDetector::Equals(s) => line == *s,
-            SessionStartDetector::Matches(rx) => rx.is_match(line),
+            SessionStartDetector::Equals(s) => line.message() == *s,
+            SessionStartDetector::Matches(rx) => rx.is_match(line.message()),
         }
     }
 }
@@ -47,37 +49,38 @@ mod tests {
     #[test]
     fn test_never_should_break() {
         let detector = SessionStartDetector::never();
-        assert!(!detector.is_new_session("any line"));
+        let line = LogLine::from_message("any line");
+        assert!(!detector.is_new_session(&line));
     }
 
     #[test]
     fn test_equals_should_break() {
         let detector = SessionStartDetector::from_message("start");
-        assert!(detector.is_new_session("start"));
-        assert!(!detector.is_new_session("not start"));
+        assert!(detector.is_new_session(&LogLine::from_message("start")));
+        assert!(!detector.is_new_session(&LogLine::from_message("not start")));
     }
 
     #[test]
     fn test_matches_should_break() {
         let rx = Regex::new(r"^start.*").unwrap();
         let detector = SessionStartDetector::from_rx(rx);
-        assert!(detector.is_new_session("start here"));
-        assert!(!detector.is_new_session("not starting"));
+        assert!(detector.is_new_session(&LogLine::from_message("start session")));
+        assert!(!detector.is_new_session(&LogLine::from_message("not start session")));
     }
 
     #[test]
     fn test_matches_empty_line() {
         let rx = Regex::new(r"^\s*$").unwrap();
         let detector = SessionStartDetector::from_rx(rx);
-        assert!(detector.is_new_session(""));
-        assert!(detector.is_new_session("   "));
-        assert!(!detector.is_new_session("not empty"));
+        assert!(detector.is_new_session(&LogLine::from_message("")));
+        assert!(detector.is_new_session(&LogLine::from_message("   ")));
+        assert!(!detector.is_new_session(&LogLine::from_message("not empty")));
     }
 
     #[test]
     fn test_equals_case_sensitive() {
         let detector = SessionStartDetector::from_message("Start");
-        assert!(detector.is_new_session("Start"));
-        assert!(!detector.is_new_session("start"));
+        assert!(detector.is_new_session(&LogLine::from_message("Start")));
+        assert!(!detector.is_new_session(&LogLine::from_message("start")));
     }
 }
