@@ -1,4 +1,5 @@
 use crate::{ProcessError, ansi_color, logline::LogLine, session::SessionStartDetector};
+use std::fmt::Write;
 
 // --------------------------------------------------------------------------
 
@@ -8,15 +9,6 @@ use crate::{ProcessError, ansi_color, logline::LogLine, session::SessionStartDet
 const END_OF_LINE: &str = "\n";
 
 const END_OF_LINE_COLOR: &str = concat!(ansi_color!(), "\n");
-
-const SESSION_BREAK: &str = "---------------------------------------------\n";
-
-const SESSION_BREAK_COLOR: &str = concat!(
-    ansi_color!(fg: 4),
-    "---------------------------------------------",
-    ansi_color!(),
-    "\n"
-);
 
 // --------------------------------------------------------------------------
 
@@ -54,7 +46,7 @@ pub struct LineProcessor<'a> {
     skip_invalid_lines: bool,
     timestamp_prefix: &'a str,
     level_table: [&'a str; 8],
-    new_session_line: &'a str,
+    new_session_prefix: &'a str,
     eol: &'a str,
 }
 
@@ -62,15 +54,15 @@ impl LineProcessor<'_> {
     /// Creates a new line processor
     ///
     pub fn new(detector: SessionStartDetector, skip_invalid_lines: bool, use_color: bool) -> Self {
-        let (new_session_line, eol, level_table, timestamp_prefix) = if use_color {
+        let (new_session_prefix, eol, level_table, timestamp_prefix) = if use_color {
             (
-                SESSION_BREAK_COLOR,
+                ansi_color!(fg: 4),
                 END_OF_LINE_COLOR,
                 DEFAULT_LEVEL_TABLE_COLOR,
                 ansi_color!(fg: 6),
             )
         } else {
-            (SESSION_BREAK, END_OF_LINE, DEFAULT_LEVEL_TABLE, "")
+            ("", END_OF_LINE, DEFAULT_LEVEL_TABLE, "")
         };
 
         Self {
@@ -78,7 +70,7 @@ impl LineProcessor<'_> {
             skip_invalid_lines,
             timestamp_prefix,
             level_table,
-            new_session_line,
+            new_session_prefix,
             eol,
         }
     }
@@ -145,7 +137,13 @@ impl LineProcessor<'_> {
         // if we discover a new session has started, we emit that as a line
         // before the first event line
         if self.detector.is_new_session(log_line) {
-            dest.push_str(self.new_session_line);
+            dest.push_str(self.new_session_prefix);
+            writeln!(
+                dest,
+                "---- Session started {} ----",
+                &log_line.timestamp()[..10]
+            )
+            .unwrap();
         }
 
         // timestamp using only the time part, i.e. '2025-01-01T23:34:56.987Z'
