@@ -250,7 +250,7 @@ mod tests {
             .unwrap();
 
         let output_str = String::from_utf8(output).unwrap();
-        assert!(output_str.contains(SESSION_BREAK));
+        assert!(output_str.contains("---- Session started "));
     }
 
     #[test]
