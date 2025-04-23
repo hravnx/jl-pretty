@@ -1,4 +1,4 @@
-name: Rust
+name: Build and test
 
 on:
   push:
@@ -16,7 +16,10 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-    - name: Build
-      run: cargo build --verbose
+    - name: Version check
+      run: cargo --version
+    - name: Lint
+      # cSpell: ignore clippy
+      run: cargo clippy && cargo clippy --tests
     - name: Run tests
       run: cargo test --verbose
