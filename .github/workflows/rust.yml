@@ -22,4 +22,4 @@ jobs:
       # cSpell: ignore clippy
       run: cargo clippy && cargo clippy --tests
     - name: Run tests
-      run: cargo test --verbose
+      run: cargo test
