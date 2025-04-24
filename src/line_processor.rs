@@ -201,7 +201,7 @@ mod tests {
         assert_eq!(output, "12:00:00Z [inf] Test message\n");
     }
 
-    const INVALID_LINES_SOURCE: &str = include_str!("test-data/log-with-invalid-lines.jsonl");
+    const INVALID_LINES_SOURCE: &str = include_str!("../test-data/log-with-invalid-lines.jsonl");
 
     #[test]
     fn test_process_lines_with_invalid_lines_skip() {
