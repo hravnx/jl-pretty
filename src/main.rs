@@ -6,7 +6,7 @@ use std::{
 };
 
 use clap::Parser;
-use jl_pretty::{LineProcessor, ProcessError, SessionStartDetector};
+use pretty::{LineProcessor, ProcessError, SessionStartDetector};
 
 // --------------------------------------------------------------------------
 
