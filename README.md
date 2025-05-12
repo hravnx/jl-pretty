@@ -1,7 +1,7 @@
 # jl-pretty
 
-`jl-pretty` is a lightweight CLI tool that parses JSON log lines from a a file or an
-input stream and pretty-prints them to the terminal as text.
+`jl-pretty` is a lightweight CLI tool that parses JSON-formatted log lines from
+a a file or an input stream and pretty-prints them to the terminal as text.
 
 ## Features
 - Colorization of lines for legibility.
